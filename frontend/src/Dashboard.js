@@ -49,6 +49,8 @@ const Dashboard = () => {
   const [lapCount, setLapCount] = useState(0);
   const [lastLapTime, setLastLapTime] = useState(null);
   const ws = useRef(null);
+  const lastGpsRef = useRef(null);
+  const lastTimeRef = useRef(null);
 
   const checkLapCompletion = (gps) => {
     if (gps.lat >= FINISH_LINE.minLat && gps.lat <= FINISH_LINE.maxLat &&
@@ -58,32 +60,80 @@ const Dashboard = () => {
     }
   };
 
+  const calculateSpeed = (currentGps, currentTime) => {
+    if (!lastGpsRef.current || !lastTimeRef.current) {
+      lastGpsRef.current = currentGps;
+      lastTimeRef.current = currentTime;
+      return 0;
+    }
+
+    const distance = getDistanceFromLatLonInKm(
+      lastGpsRef.current.lat,
+      lastGpsRef.current.lng,
+      currentGps.lat,
+      currentGps.lng
+    );
+
+    const timeElapsed = (currentTime - lastTimeRef.current) / 1000 / 3600; // convert to hours
+
+    const speed = distance / timeElapsed; // km/h
+
+    lastGpsRef.current = currentGps;
+    lastTimeRef.current = currentTime;
+
+    return speed;
+  };
+
+  function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of the earth in km
+    const dLat = deg2rad(lat2 - lat1);
+    const dLon = deg2rad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in km
+    return d;
+  }
+
+  function deg2rad(deg) {
+    return deg * (Math.PI / 180);
+  }
+
   useEffect(() => {
     ws.current = new WebSocket('ws://localhost:3001');
     
     ws.current.onmessage = (event) => {
       const newData = JSON.parse(event.data);
+      const currentTime = new Date();
+      const calculatedSpeed = calculateSpeed(newData.gps, currentTime);
+      
       setData(prevData => ({
         ...prevData,
         ...newData,
-        time: new Date().toLocaleTimeString(),
-        // You'll need to calculate speed based on GPS data changes over time
-        speed: calculateSpeed(prevData.gps, newData.gps)
+        time: currentTime.toLocaleTimeString(),
+        speed: calculatedSpeed
       }));
+      
       checkLapCompletion(newData.gps);
     };
 
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    ws.current.onclose = () => {
+      console.log('WebSocket connection closed');
+      // You might want to implement reconnection logic here
+    };
+
     return () => {
-      ws.current.close();
+      if (ws.current) {
+        ws.current.close();
+      }
     };
   }, []);
-
-  // This is a placeholder function. You'll need to implement actual speed calculation
-  const calculateSpeed = (prevGPS, currentGPS) => {
-    // Calculate speed based on GPS coordinate changes
-    // This is just a placeholder
-    return Math.random() * 100;
-  };
 
   return (
     <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
